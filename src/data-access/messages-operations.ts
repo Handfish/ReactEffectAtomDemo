@@ -111,6 +111,8 @@ export const useMarkMessagesAsRead = (messages: Message[]) => {
   // Create observer once with stable callback
   const observerCallback = React.useCallback(
     (entries: IntersectionObserverEntry[]) => {
+      if (!document.hasFocus()) return;
+
       Arr.forEach(entries, (entry) => {
         if (!entry.isIntersecting) return;
 
@@ -120,9 +122,8 @@ export const useMarkMessagesAsRead = (messages: Message[]) => {
 
         if (Option.isSome(messageId)) {
           offer(messageId.value as Message["id"]);
+          observer.current?.unobserve(entry.target);
         }
-
-        observer.current?.unobserve(entry.target);
       });
     },
     [offer],
