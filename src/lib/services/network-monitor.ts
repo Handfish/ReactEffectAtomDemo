@@ -1,41 +1,26 @@
-import { Context, Effect, Layer, PubSub, Stream, SubscriptionRef } from "effect";
+import { Chunk, Effect, Stream, SubscriptionRef } from "effect";
 
-export class NetworkMonitor extends Context.Tag("NetworkMonitor")<
-  NetworkMonitor,
-  {
-    readonly isOnline: SubscriptionRef.SubscriptionRef<boolean>;
-    readonly onOnline: Stream.Stream<void>;
-  }
->() {
-  static readonly Default = Layer.scoped(
-    NetworkMonitor,
-    Effect.gen(function* () {
-      const isOnline = yield* SubscriptionRef.make(navigator.onLine);
-      const pubsub = yield* PubSub.unbounded<void>();
+export class NetworkMonitor extends Effect.Service<NetworkMonitor>()("NetworkMonitor", {
+  effect: Effect.gen(function* () {
+    const latch = yield* Effect.makeLatch(true);
+    yield* Effect.log("Created NetworkMonitor");
 
-      const handleOnline = () => {
-        Effect.runSync(SubscriptionRef.set(isOnline, true));
-        Effect.runSync(PubSub.publish(pubsub, void 0));
-      };
+    const ref = yield* SubscriptionRef.make<boolean>(window.navigator.onLine);
 
-      const handleOffline = () => {
-        Effect.runSync(SubscriptionRef.set(isOnline, false));
-      };
+    yield* Stream.async<boolean>((emit) => {
+      window.addEventListener("online", () => emit(Effect.succeed(Chunk.of(true))));
+      window.addEventListener("offline", () => emit(Effect.succeed(Chunk.of(false))));
+    }).pipe(
+      Stream.tap((isOnline) =>
+        (isOnline ? latch.open : latch.close).pipe(
+          Effect.zipRight(SubscriptionRef.update(ref, () => isOnline)),
+        ),
+      ),
+      Stream.runDrain,
+      Effect.forkDaemon,
+    );
 
-      window.addEventListener("online", handleOnline);
-      window.addEventListener("offline", handleOffline);
-
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          window.removeEventListener("online", handleOnline);
-          window.removeEventListener("offline", handleOffline);
-        })
-      );
-
-      return {
-        isOnline,
-        onOnline: Stream.fromPubSub(pubsub),
-      };
-    })
-  );
-}
+    return { latch, ref };
+  }),
+  accessors: true,
+}) {}
