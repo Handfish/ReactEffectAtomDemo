@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream, SubscriptionRef } from "effect";
+import { Chunk, Console, Effect, Stream, SubscriptionRef } from "effect";
 
 export class NetworkMonitor extends Effect.Service<NetworkMonitor>()("NetworkMonitor", {
   effect: Effect.gen(function* () {
@@ -16,6 +16,7 @@ export class NetworkMonitor extends Effect.Service<NetworkMonitor>()("NetworkMon
           Effect.zipRight(SubscriptionRef.update(ref, () => isOnline)),
         ),
       ),
+      Stream.tap((isOnline) => Console.log("NetworkMonitor Online:", isOnline)),
       Stream.runDrain,
       Effect.forkDaemon,
     );
