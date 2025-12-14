@@ -51,12 +51,10 @@ export const useMessagesQuery = () => {
   return useAtomValue(messagesAtom);
 };
 
-// Track which message IDs have been queued to avoid duplicates
-const queuedMessageIds = new Set<string>();
-
 export const useMarkMessagesAsRead = (messages: Message[]) => {
   const processorResult = useAtomValue(batchProcessorAtom);
   const [readMessageIds, setReadMessageIds] = React.useState<Set<string>>(new Set());
+  const queuedMessageIds = React.useRef(new Set<string>());
 
   const unreadMessages = React.useMemo(
     () => messages.filter((message) => message.readAt === null && !readMessageIds.has(message.id)),
@@ -66,10 +64,10 @@ export const useMarkMessagesAsRead = (messages: Message[]) => {
   const offer = React.useCallback(
     (id: Message["id"]) => {
       // Skip if already queued
-      if (queuedMessageIds.has(id)) {
+      if (queuedMessageIds.current.has(id)) {
         return;
       }
-      queuedMessageIds.add(id);
+      queuedMessageIds.current.add(id);
 
       // Add to queue for batching (if processor is ready)
       if (Result.isSuccess(processorResult)) {
