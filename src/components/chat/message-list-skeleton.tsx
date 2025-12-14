@@ -1,6 +1,6 @@
 import { MessageBubbleSkeleton } from "./message-bubble-skeleton";
 
-export const MessageListSkeleton: React.FC = () => {
+export const MessageListSkeleton = () => {
   const widths = [180, 260, 200, 180, 260, 200, 180, 260, 200];
 
   return (

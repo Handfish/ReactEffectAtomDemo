@@ -2,7 +2,7 @@ interface MessageBubbleSkeletonProps {
   width?: number;
 }
 
-export const MessageBubbleSkeleton: React.FC<MessageBubbleSkeletonProps> = ({ width = 200 }) => {
+export const MessageBubbleSkeleton = ({ width = 200 }: MessageBubbleSkeletonProps) => {
   return (
     <div className="flex flex-col">
       <div className="flex items-end gap-2">

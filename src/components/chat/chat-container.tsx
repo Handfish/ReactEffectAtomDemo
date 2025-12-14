@@ -3,10 +3,11 @@ import {
   useMessagesQuery,
   useMarkMessagesAsRead,
 } from "@/data-access/messages-operations";
+import { Message } from "@/types/message";
 import { MessageList } from "./message-list";
 import { MessageListSkeleton } from "./message-list-skeleton";
 
-export const ChatContainer: React.FC = () => {
+export const ChatContainer = () => {
   const messagesResult = useMessagesQuery();
 
   return (
@@ -35,9 +36,11 @@ export const ChatContainer: React.FC = () => {
 };
 
 // Separate component to use the hook with messages
-const MessageListWithReadTracking: React.FC<{
-  messages: import("@/types/message").Message[];
-}> = ({ messages: initialMessages }) => {
+const MessageListWithReadTracking = ({
+  messages: initialMessages,
+}: {
+  messages: Message[];
+}) => {
   const { observer, messages } = useMarkMessagesAsRead(initialMessages);
   return <MessageList messages={messages} observer={observer} />;
 };
