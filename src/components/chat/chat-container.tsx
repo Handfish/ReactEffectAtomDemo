@@ -1,31 +1,16 @@
-import { Button } from "@/components/ui/button";
-import { MessagesOperations } from "@/lib/services/messages/namespace";
-import { Message } from "@/types/message.ts";
-import { UseQueryResult } from "@tanstack/react-query";
-import { AlertCircle } from "lucide-react";
+import { Result } from "@effect-atom/atom-react";
+import { Cause } from "effect";
+import {
+  useMessagesQuery,
+  useMarkMessagesAsRead,
+} from "@/data-access/messages-operations";
 import { MessageList } from "./message-list";
 import { MessageListSkeleton } from "./message-list-skeleton";
-
-const ErrorState: React.FC<{ messagesQuery: UseQueryResult<Message[]> }> = ({ messagesQuery }) => {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 p-4">
-      <AlertCircle className="size-12 text-destructive" />
-
-      <div className="text-center">
-        <p className="font-semibold text-destructive">Error loading messages</p>
-        <p className="text-sm text-muted-foreground">Something went wrong. Please try again.</p>
-      </div>
-
-      <Button variant="outline" onClick={() => messagesQuery.refetch()}>
-        <AlertCircle className="size-4" />
-        Retry
-      </Button>
-    </div>
-  );
-};
+import { Button } from "@/components/ui/button";
+import { AlertCircle } from "lucide-react";
 
 export const ChatContainer: React.FC = () => {
-  const messagesQuery = MessagesOperations.useMessagesQuery();
+  const messagesResult = useMessagesQuery();
 
   return (
     <div className="flex h-full flex-col rounded-lg border bg-card">
@@ -34,14 +19,45 @@ export const ChatContainer: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {messagesQuery.isLoading ? (
-          <MessageListSkeleton />
-        ) : !messagesQuery.isSuccess ? (
-          <ErrorState messagesQuery={messagesQuery} />
-        ) : (
-          <MessageList messages={messagesQuery.data} />
-        )}
+        {Result.builder(messagesResult)
+          .onInitial(() => <MessageListSkeleton />)
+          .onFailure((cause) => (
+            <div className="flex h-full flex-col items-center justify-center gap-4 p-4">
+              <AlertCircle className="size-12 text-destructive" />
+              <div className="text-center">
+                <p className="font-semibold text-destructive">
+                  Error loading messages
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {Cause.pretty(cause)}
+                </p>
+              </div>
+              <Button variant="outline" onClick={() => window.location.reload()}>
+                <AlertCircle className="size-4" />
+                Retry
+              </Button>
+            </div>
+          ))
+          .onSuccess((messages, { waiting }) => (
+            <>
+              {waiting && (
+                <div className="border-b bg-muted/50 px-4 py-2 text-center text-sm text-muted-foreground">
+                  Refreshing...
+                </div>
+              )}
+              <MessageListWithReadTracking messages={messages} />
+            </>
+          ))
+          .render()}
       </div>
     </div>
   );
+};
+
+// Separate component to use the hook with messages
+const MessageListWithReadTracking: React.FC<{
+  messages: import("@/types/message").Message[];
+}> = ({ messages: initialMessages }) => {
+  const { observer, messages } = useMarkMessagesAsRead(initialMessages);
+  return <MessageList messages={messages} observer={observer} />;
 };

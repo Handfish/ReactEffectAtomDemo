@@ -70,10 +70,7 @@ export class MessagesService extends Effect.Service<MessagesService>()("Messages
           );
 
           yield* Effect.log(`Batched: ${Chunk.join(batch, ", ")}`);
-        }).pipe(
-          networkMonitor.latch.whenOpen,
-          Effect.retry({ times: 3, schedule: Schedule.exponential("500 millis", 2) }),
-        ),
+        }).pipe(Effect.retry({ times: 3, schedule: Schedule.exponential("500 millis", 2) })),
     };
   }),
 }) {}

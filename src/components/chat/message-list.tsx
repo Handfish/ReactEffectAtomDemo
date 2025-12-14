@@ -1,15 +1,13 @@
-import { MessagesOperations } from "@/lib/services/messages/namespace";
 import { Message } from "@/types/message";
-import * as React from "react";
 import { MessageBubble } from "./message-bubble";
+import React from "react";
 
 type Props = {
   messages: Message[];
+  observer: React.RefObject<IntersectionObserver | null>;
 };
 
-export const MessageList: React.FC<Props> = ({ messages }) => {
-  const { observer } = MessagesOperations.useMarkMessagesAsRead(messages);
-
+export const MessageList: React.FC<Props> = ({ messages, observer }) => {
   return (
     <div className="flex flex-col gap-4 p-4">
       {messages.map((message) => (
@@ -18,10 +16,8 @@ export const MessageList: React.FC<Props> = ({ messages }) => {
           message={message}
           data-message-id={message.id}
           ref={(el) => {
-            if (el !== null && message.readAt === null) {
-              requestAnimationFrame(() => {
-                observer.current?.observe(el);
-              });
+            if (el && message.readAt === null) {
+              observer.current?.observe(el);
             }
           }}
         />
