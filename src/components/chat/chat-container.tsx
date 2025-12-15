@@ -20,6 +20,17 @@ export const ChatContainer = () => {
       <div className="flex-1 overflow-y-auto">
         {Result.builder(result)
           .onInitial(() => <MessageListSkeleton />)
+          .onFailure(() => (
+            <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
+              <div className="text-destructive">Failed to load messages</div>
+              <button
+                onClick={pull}
+                className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
+              >
+                Retry
+              </button>
+            </div>
+          ))
           .onSuccess(({ items, done }, { waiting }) => {
             const messages = items.flat();
             return (
