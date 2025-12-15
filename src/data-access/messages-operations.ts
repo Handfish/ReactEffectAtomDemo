@@ -53,11 +53,11 @@ const batchProcessorAtom = appRuntime
               .pipe(
                 networkMonitor.latch.whenOpen,
                 Effect.retry({ times: 3, schedule: Schedule.exponential("500 millis", 2) }),
+                Effect.catchAllCause((cause) => Effect.log(cause, "Error processing batch")),
               ),
           { concurrency: 1 },
         ),
         Stream.runDrain,
-        Effect.catchAllCause((cause) => Effect.log(cause, "Error in markAsRead batch processor")),
         Effect.forkScoped,
       );
 
@@ -134,8 +134,6 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
   // Create observer once with stable callback
   const observerCallback = React.useCallback(
     (entries: IntersectionObserverEntry[]) => {
-      if (!document.hasFocus()) return;
-
       Arr.forEach(entries, (entry) => {
         if (!entry.isIntersecting) return;
 
@@ -145,8 +143,9 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
 
         if (Option.isSome(messageId)) {
           offer(messageId.value as Message["id"]);
-          observer.current?.unobserve(entry.target);
         }
+
+        observer.current?.unobserve(entry.target);
       });
     },
     [offer],
@@ -154,7 +153,7 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
 
   React.useEffect(() => {
     observer.current = new IntersectionObserver(observerCallback, {
-      threshold: 0.5, // Mark as read when 50% visible (allows last messages to be marked)
+      threshold: 1,
     });
 
     return () => observer.current?.disconnect();

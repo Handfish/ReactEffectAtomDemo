@@ -110,7 +110,7 @@ app.post("/messages/mark-read", async (c) => {
 
   console.log(`Marked ${body.messageIds.length} messages as read:`, body.messageIds);
 
-  return c.json(null);
+  return c.body(null, 204);
 });
 
 const port = 3001;
