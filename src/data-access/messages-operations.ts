@@ -53,6 +53,7 @@ const batchProcessorAtom = appRuntime
               .pipe(
                 networkMonitor.latch.whenOpen,
                 Effect.retry({ times: 3, schedule: Schedule.exponential("500 millis", 2) }),
+                Effect.tap(() => Effect.log(`Batched: ${Chunk.join(batch, ", ")}`)),
                 Effect.catchAllCause((cause) => Effect.log(cause, "Error processing batch")),
               ),
           { concurrency: 1 },
@@ -78,6 +79,9 @@ export const useMessagesQuery = () => {
 export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
   const processorResult = useAtomValue(batchProcessorAtom);
   const [readMessageIds, setReadMessageIds] = React.useState<Set<string>>(new Set());
+
+  // Store refs in a Map keyed by message ID
+  const elementRefs = React.useRef<Map<string, HTMLElement>>(new Map());
 
   const unreadMessages = React.useMemo(
     () => messages.filter((message) => message.readAt === null && !readMessageIds.has(message.id)),
@@ -106,7 +110,7 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
   // Handle focus events - mark visible unread messages as read
   const markVisibleUnreadMessages = React.useCallback(() => {
     unreadMessages.forEach((message) => {
-      const element = document.querySelector(`[data-message-id="${message.id}"]`);
+      const element = elementRefs.current.get(message.id);
       if (!element) return;
 
       const rect = element.getBoundingClientRect();
@@ -131,24 +135,29 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
   // IntersectionObserver for visibility tracking
   const observer = React.useRef<IntersectionObserver | null>(null);
 
+  // Helper to find message ID from element via reverse lookup
+  const findMessageIdByElement = React.useCallback((element: Element): Message["id"] | undefined => {
+    for (const [id, el] of elementRefs.current) {
+      if (el === element) return id as Message["id"];
+    }
+    return undefined;
+  }, []);
+
   // Create observer once with stable callback
   const observerCallback = React.useCallback(
     (entries: IntersectionObserverEntry[]) => {
       Arr.forEach(entries, (entry) => {
         if (!entry.isIntersecting) return;
 
-        const messageId = Option.fromNullable(entry.target.getAttribute("data-message-id")).pipe(
-          Option.flatMap(Option.liftPredicate((str) => str !== "")),
-        );
-
-        if (Option.isSome(messageId)) {
-          offer(messageId.value as Message["id"]);
+        const messageId = findMessageIdByElement(entry.target);
+        if (messageId) {
+          offer(messageId);
         }
 
         observer.current?.unobserve(entry.target);
       });
     },
-    [offer],
+    [offer, findMessageIdByElement],
   );
 
   React.useEffect(() => {
@@ -159,17 +168,21 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
     return () => observer.current?.disconnect();
   }, [observerCallback]);
 
-  // Re-observe unread messages when observer or messages change
-  React.useEffect(() => {
-    if (!observer.current) return;
-
-    unreadMessages.forEach((message) => {
-      const element = document.querySelector(`[data-message-id="${message.id}"]`);
+  // Ref callback to register/unregister elements and observe unread ones
+  const setElementRef = React.useCallback(
+    (id: Message["id"], element: HTMLElement | null) => {
       if (element) {
-        observer.current?.observe(element);
+        elementRefs.current.set(id, element);
+        // Observe if unread
+        if (!readMessageIds.has(id)) {
+          observer.current?.observe(element);
+        }
+      } else {
+        elementRefs.current.delete(id);
       }
-    });
-  }, [unreadMessages]);
+    },
+    [readMessageIds],
+  );
 
   // Merge read status: return messages with readAt updated for optimistically marked messages
   const messagesWithReadStatus = React.useMemo(
@@ -182,5 +195,5 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
     [messages, readMessageIds],
   );
 
-  return { observer, messages: messagesWithReadStatus };
+  return { setElementRef, messages: messagesWithReadStatus };
 };

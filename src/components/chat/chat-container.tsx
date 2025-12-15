@@ -49,7 +49,7 @@ const MessageListWithReadTracking = ({
   loading: boolean;
   onLoadMore: () => void;
 }) => {
-  const { observer, messages } = useMarkMessagesAsRead(initialMessages);
+  const { setElementRef, messages } = useMarkMessagesAsRead(initialMessages);
   const loadMoreRef = React.useRef<HTMLDivElement>(null);
 
   // Observe the load more sentinel to trigger infinite scroll
@@ -74,7 +74,7 @@ const MessageListWithReadTracking = ({
 
   return (
     <>
-      <MessageList messages={messages} observer={observer} />
+      <MessageList messages={messages} setElementRef={setElementRef} />
       {!done && (
         <div ref={loadMoreRef} className="flex justify-center p-4">
           {loading ? (

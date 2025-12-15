@@ -1,25 +1,19 @@
 import { Message } from "@/types/message";
 import { MessageBubble } from "./message-bubble";
-import React from "react";
 
 type Props = {
   messages: readonly Message[];
-  observer: React.RefObject<IntersectionObserver | null>;
+  setElementRef: (id: Message["id"], element: HTMLElement | null) => void;
 };
 
-export const MessageList = ({ messages, observer }: Props) => {
+export const MessageList = ({ messages, setElementRef }: Props) => {
   return (
     <div className="flex flex-col gap-4 p-4">
       {messages.map((message) => (
         <MessageBubble
           key={message.id}
           message={message}
-          data-message-id={message.id}
-          ref={(el) => {
-            if (el && message.readAt === null) {
-              observer.current?.observe(el);
-            }
-          }}
+          ref={(el) => setElementRef(message.id, el)}
         />
       ))}
     </div>
