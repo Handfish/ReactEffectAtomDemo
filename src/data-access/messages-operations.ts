@@ -1,9 +1,10 @@
+import { useVisibilityTracker } from "@/hooks/useVisibilityTracker";
+import { MessagesClient } from "@/lib/api/messages-client";
+import { appRuntime } from "@/lib/app-runtime";
+import { NetworkMonitor } from "@/lib/services/network-monitor";
 import { Message, MessageId } from "@/types/message";
 import { Atom, Result, useAtom, useAtomValue } from "@effect-atom/atom-react";
-import { appRuntime } from "@/lib/app-runtime";
-import { MessagesClient } from "@/lib/api/messages-client";
-import { NetworkMonitor } from "@/lib/services/network-monitor";
-import { Array as Arr, Chunk, DateTime, Duration, Effect, Option, Queue, Schedule, Stream } from "effect";
+import { Chunk, DateTime, Duration, Effect, Option, Queue, Schedule, Stream } from "effect";
 import React from "react";
 
 // ============================================================================
@@ -18,13 +19,20 @@ const messagesStream = Stream.paginateEffect(undefined as string | undefined, (c
       urlParams: cursor !== undefined ? { cursor } : {},
     });
 
-    const nextState = response.nextCursor !== null ? Option.some(response.nextCursor) : Option.none();
+    const nextState =
+      response.nextCursor !== null ? Option.some(response.nextCursor) : Option.none();
     return [response.messages, nextState] as const;
   }),
 );
 
 // Use Atom.pull to create a pull-based atom for infinite scroll
 export const messagesAtom = appRuntime.pull(messagesStream).pipe(Atom.keepAlive);
+
+// React Hooks for message stream
+export const useMessagesQuery = () => {
+  const [result, pull] = useAtom(messagesAtom);
+  return { result, pull };
+};
 
 // ============================================================================
 // Batch Processor Atom (handles the stream with batching)
@@ -68,123 +76,62 @@ const batchProcessorAtom = appRuntime
   .pipe(Atom.keepAlive);
 
 // ============================================================================
-// React Hooks
+// React Hook for Batch Updating
 // ============================================================================
-
-export const useMessagesQuery = () => {
-  const [result, pull] = useAtom(messagesAtom);
-  return { result, pull };
-};
 
 export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
   const processorResult = useAtomValue(batchProcessorAtom);
   const [readMessageIds, setReadMessageIds] = React.useState<Set<string>>(new Set());
 
-  // Store refs in a Map keyed by message ID
-  const elementRefs = React.useRef<Map<string, HTMLElement>>(new Map());
-
-  const unreadMessages = React.useMemo(
-    () => messages.filter((message) => message.readAt === null && !readMessageIds.has(message.id)),
-    [messages, readMessageIds],
-  );
-
-  const offer = React.useCallback(
+  // Mark a message as read: queue it for batching + optimistic update
+  const markAsRead = React.useCallback(
     (id: Message["id"]) => {
-      // Skip if already queued (module-level deduplication)
-      if (queuedMessageIds.has(id)) {
-        return;
-      }
+      if (queuedMessageIds.has(id)) return;
       queuedMessageIds.add(id);
 
-      // Add to queue for batching (if processor is ready)
       if (Result.isSuccess(processorResult)) {
         processorResult.value.markAsReadQueue.unsafeOffer(id);
       }
 
-      // Optimistic update via React state
       setReadMessageIds((prev) => new Set(prev).add(id));
     },
     [processorResult],
   );
 
+  // Track visibility and mark as read when elements become visible
+  const { setElementRef, getElement } = useVisibilityTracker({
+    onVisible: markAsRead,
+    skipIds: readMessageIds,
+  });
+
   // Handle focus events - mark visible unread messages as read
-  const markVisibleUnreadMessages = React.useCallback(() => {
-    unreadMessages.forEach((message) => {
-      const element = elementRefs.current.get(message.id);
-      if (!element) return;
-
-      const rect = element.getBoundingClientRect();
-      const isFullyVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
-
-      if (isFullyVisible) {
-        offer(message.id);
-      }
-    });
-  }, [offer, unreadMessages]);
+  const unreadMessages = React.useMemo(
+    () => messages.filter((msg) => msg.readAt === null && !readMessageIds.has(msg.id)),
+    [messages, readMessageIds],
+  );
 
   React.useEffect(() => {
     const handleFocus = () => {
       if (!document.hasFocus()) return;
-      markVisibleUnreadMessages();
+
+      unreadMessages.forEach((message) => {
+        const element = getElement(message.id);
+        if (!element) return;
+
+        const rect = element.getBoundingClientRect();
+        const isFullyVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
+
+        if (isFullyVisible) {
+          markAsRead(message.id);
+        }
+      });
     };
 
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, [markVisibleUnreadMessages]);
+  }, [unreadMessages, getElement, markAsRead]);
 
-  // IntersectionObserver for visibility tracking
-  const observer = React.useRef<IntersectionObserver | null>(null);
-
-  // Helper to find message ID from element via reverse lookup
-  const findMessageIdByElement = React.useCallback((element: Element): Message["id"] | undefined => {
-    for (const [id, el] of elementRefs.current) {
-      if (el === element) return id as Message["id"];
-    }
-    return undefined;
-  }, []);
-
-  // Create observer once with stable callback
-  const observerCallback = React.useCallback(
-    (entries: IntersectionObserverEntry[]) => {
-      Arr.forEach(entries, (entry) => {
-        if (!entry.isIntersecting) return;
-
-        const messageId = findMessageIdByElement(entry.target);
-        if (messageId) {
-          offer(messageId);
-        }
-
-        observer.current?.unobserve(entry.target);
-      });
-    },
-    [offer, findMessageIdByElement],
-  );
-
-  React.useEffect(() => {
-    observer.current = new IntersectionObserver(observerCallback, {
-      threshold: 1,
-    });
-
-    return () => observer.current?.disconnect();
-  }, [observerCallback]);
-
-  // Ref callback to register/unregister elements and observe unread ones
-  const setElementRef = React.useCallback(
-    (id: Message["id"], element: HTMLElement | null) => {
-      if (element) {
-        elementRefs.current.set(id, element);
-        // Observe if unread
-        if (!readMessageIds.has(id)) {
-          observer.current?.observe(element);
-        }
-      } else {
-        elementRefs.current.delete(id);
-      }
-    },
-    [readMessageIds],
-  );
-
-  // Merge read status: return messages with readAt updated for optimistically marked messages
+  // Merge read status for optimistic updates
   const messagesWithReadStatus = React.useMemo(
     () =>
       messages.map((msg) =>
