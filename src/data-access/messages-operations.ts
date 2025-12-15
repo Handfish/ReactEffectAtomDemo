@@ -135,7 +135,7 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
     setBatchError(null);
   }, []);
 
-  // Mark a message as read: queue it for batching (no optimistic update)
+  // Mark a message as read: queue it for batching + optimistic update
   const markAsRead = React.useCallback(
     (id: Message["id"]) => {
       if (queuedMessageIds.has(id)) return;
@@ -144,6 +144,9 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
       if (Result.isSuccess(processorResult)) {
         processorResult.value.markAsReadQueue.unsafeOffer(id);
       }
+
+      // Optimistic update
+      setReadMessageIds((prev) => new Set(prev).add(id));
     },
     [processorResult],
   );
