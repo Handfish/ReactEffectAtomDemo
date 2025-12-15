@@ -6,9 +6,10 @@ import {
 import { Message } from "@/types/message";
 import { MessageList } from "./message-list";
 import { MessageListSkeleton } from "./message-list-skeleton";
+import React from "react";
 
 export const ChatContainer = () => {
-  const messagesResult = useMessagesQuery();
+  const { result, pull } = useMessagesQuery();
 
   return (
     <div className="flex h-full flex-col rounded-lg border bg-card">
@@ -17,18 +18,19 @@ export const ChatContainer = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {Result.builder(messagesResult)
+        {Result.builder(result)
           .onInitial(() => <MessageListSkeleton />)
-          .onSuccess((messages, result) => (
-            <>
-              {result.waiting && (
-                <div className="border-b bg-muted/50 px-4 py-2 text-center text-sm text-muted-foreground">
-                  Refreshing...
-                </div>
-              )}
-              <MessageListWithReadTracking messages={messages} />
-            </>
-          ))
+          .onSuccess(({ items, done }, { waiting }) => {
+            const messages = items.flat();
+            return (
+              <MessageListWithReadTracking
+                messages={messages}
+                done={done}
+                loading={waiting}
+                onLoadMore={pull}
+              />
+            );
+          })
           .render()}
       </div>
     </div>
@@ -38,9 +40,55 @@ export const ChatContainer = () => {
 // Separate component to use the hook with messages
 const MessageListWithReadTracking = ({
   messages: initialMessages,
+  done,
+  loading,
+  onLoadMore,
 }: {
-  messages: Message[];
+  messages: readonly Message[];
+  done: boolean;
+  loading: boolean;
+  onLoadMore: () => void;
 }) => {
   const { observer, messages } = useMarkMessagesAsRead(initialMessages);
-  return <MessageList messages={messages} observer={observer} />;
+  const loadMoreRef = React.useRef<HTMLDivElement>(null);
+
+  // Observe the load more sentinel to trigger infinite scroll
+  React.useEffect(() => {
+    if (done || loading) return;
+
+    const sentinel = loadMoreRef.current;
+    if (!sentinel) return;
+
+    const intersectionObserver = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          onLoadMore();
+        }
+      },
+      { threshold: 0.1 },
+    );
+
+    intersectionObserver.observe(sentinel);
+    return () => intersectionObserver.disconnect();
+  }, [done, loading, onLoadMore]);
+
+  return (
+    <>
+      <MessageList messages={messages} observer={observer} />
+      {!done && (
+        <div ref={loadMoreRef} className="flex justify-center p-4">
+          {loading ? (
+            <div className="text-sm text-muted-foreground">Loading more...</div>
+          ) : (
+            <button
+              onClick={onLoadMore}
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              Load more messages
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
 };

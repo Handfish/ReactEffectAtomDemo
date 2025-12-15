@@ -3,7 +3,7 @@ import { MessageBubble } from "./message-bubble";
 import React from "react";
 
 type Props = {
-  messages: Message[];
+  messages: readonly Message[];
   observer: React.RefObject<IntersectionObserver | null>;
 };
 

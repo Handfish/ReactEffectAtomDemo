@@ -1,38 +1,61 @@
-import { runtimeAtom } from "@/lib/app-runtime";
-import { MessagesService } from "@/lib/services/messages/service";
 import { Message, MessageId } from "@/types/message";
-import { Atom, Result, useAtomValue } from "@effect-atom/atom-react";
-import { Array as Arr, Chunk, DateTime, Duration, Effect, Option, Queue, Stream } from "effect";
+import { Atom, Result, useAtom, useAtomValue } from "@effect-atom/atom-react";
+import { appRuntime } from "@/lib/app-runtime";
+import { MessagesClient } from "@/lib/api/messages-client";
+import { NetworkMonitor } from "@/lib/services/network-monitor";
+import { Array as Arr, Chunk, DateTime, Duration, Effect, Option, Queue, Schedule, Stream } from "effect";
 import React from "react";
 
 // ============================================================================
-// Messages Atom (for initial data loading)
+// Messages Query with Infinite Scroll (using Atom.pull)
 // ============================================================================
 
-export const messagesAtom = runtimeAtom
+// Create a stream that fetches messages page by page using paginateEffect
+const messagesStream = Stream.paginateEffect(undefined as string | undefined, (cursor) =>
+  Effect.gen(function* () {
+    const client = yield* MessagesClient;
+    const response = yield* client.messages.getMessages({
+      urlParams: cursor !== undefined ? { cursor } : {},
+    });
+
+    const nextState = response.nextCursor !== null ? Option.some(response.nextCursor) : Option.none();
+    return [response.messages, nextState] as const;
+  }),
+);
+
+// Use Atom.pull to create a pull-based atom for infinite scroll
+export const messagesAtom = appRuntime.pull(messagesStream).pipe(Atom.keepAlive);
+
+// ============================================================================
+// Batch Processor Atom (handles the stream with batching)
+// ============================================================================
+
+// Track which message IDs have been queued to avoid duplicates
+const queuedMessageIds = new Set<string>();
+
+const batchProcessorAtom = appRuntime
   .atom(
     Effect.gen(function* () {
-      const service = yield* MessagesService;
-      return yield* service.getMessages();
-    }),
-  )
-  .pipe(Atom.keepAlive);
-
-// ============================================================================
-// Batch Processor Atom (handles the stream with logging)
-// ============================================================================
-
-const batchProcessorAtom = runtimeAtom
-  .atom(
-    Effect.gen(function* () {
-      const service = yield* MessagesService;
+      const client = yield* MessagesClient;
+      const networkMonitor = yield* NetworkMonitor;
       const markAsReadQueue = yield* Queue.unbounded<MessageId>();
 
       yield* Stream.fromQueue(markAsReadQueue).pipe(
         Stream.tap((value) => Effect.log(`Queued up ${value}`)),
         Stream.groupedWithin(25, Duration.seconds(5)),
         Stream.tap((batch) => Effect.log(`Batching: ${Chunk.join(batch, ", ")}`)),
-        Stream.mapEffect((batch) => service.sendMarkAsReadBatch(batch), { concurrency: "unbounded" }),
+        Stream.mapEffect(
+          (batch) =>
+            client.messages
+              .markAsRead({
+                payload: { messageIds: Chunk.toReadonlyArray(batch) as MessageId[] },
+              })
+              .pipe(
+                networkMonitor.latch.whenOpen,
+                Effect.retry({ times: 3, schedule: Schedule.exponential("500 millis", 2) }),
+              ),
+          { concurrency: 1 },
+        ),
         Stream.runDrain,
         Effect.catchAllCause((cause) => Effect.log(cause, "Error in markAsRead batch processor")),
         Effect.forkScoped,
@@ -48,13 +71,13 @@ const batchProcessorAtom = runtimeAtom
 // ============================================================================
 
 export const useMessagesQuery = () => {
-  return useAtomValue(messagesAtom);
+  const [result, pull] = useAtom(messagesAtom);
+  return { result, pull };
 };
 
-export const useMarkMessagesAsRead = (messages: Message[]) => {
+export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
   const processorResult = useAtomValue(batchProcessorAtom);
   const [readMessageIds, setReadMessageIds] = React.useState<Set<string>>(new Set());
-  const queuedMessageIds = React.useRef(new Set<string>());
 
   const unreadMessages = React.useMemo(
     () => messages.filter((message) => message.readAt === null && !readMessageIds.has(message.id)),
@@ -63,11 +86,11 @@ export const useMarkMessagesAsRead = (messages: Message[]) => {
 
   const offer = React.useCallback(
     (id: Message["id"]) => {
-      // Skip if already queued
-      if (queuedMessageIds.current.has(id)) {
+      // Skip if already queued (module-level deduplication)
+      if (queuedMessageIds.has(id)) {
         return;
       }
-      queuedMessageIds.current.add(id);
+      queuedMessageIds.add(id);
 
       // Add to queue for batching (if processor is ready)
       if (Result.isSuccess(processorResult)) {
@@ -131,7 +154,7 @@ export const useMarkMessagesAsRead = (messages: Message[]) => {
 
   React.useEffect(() => {
     observer.current = new IntersectionObserver(observerCallback, {
-      threshold: 1,
+      threshold: 0.5, // Mark as read when 50% visible (allows last messages to be marked)
     });
 
     return () => observer.current?.disconnect();
