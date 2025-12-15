@@ -9,7 +9,7 @@ import { MessageListSkeleton } from "./message-list-skeleton";
 import React from "react";
 
 export const ChatContainer = () => {
-  const { result, pull } = useMessagesQuery();
+  const { result, pull, refresh } = useMessagesQuery();
 
   return (
     <div className="flex h-full flex-col rounded-lg border bg-card">
@@ -24,7 +24,7 @@ export const ChatContainer = () => {
             <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
               <div className="text-destructive">Failed to load messages</div>
               <button
-                onClick={pull}
+                onClick={refresh}
                 className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
               >
                 Retry

@@ -3,7 +3,7 @@ import { MessagesClient } from "@/lib/api/messages-client";
 import { appRuntime } from "@/lib/app-runtime";
 import { NetworkMonitor } from "@/lib/services/network-monitor";
 import { Message, MessageId } from "@/types/message";
-import { Atom, Result, useAtom, useAtomValue } from "@effect-atom/atom-react";
+import { Atom, Result, useAtom, useAtomRefresh, useAtomValue } from "@effect-atom/atom-react";
 import { Chunk, DateTime, Duration, Effect, Option, Queue, Schedule, Stream } from "effect";
 import React from "react";
 
@@ -31,7 +31,8 @@ export const messagesAtom = appRuntime.pull(messagesStream).pipe(Atom.keepAlive)
 // React Hooks for message stream
 export const useMessagesQuery = () => {
   const [result, pull] = useAtom(messagesAtom);
-  return { result, pull };
+  const refresh = useAtomRefresh(messagesAtom);
+  return { result, pull, refresh };
 };
 
 // ============================================================================
@@ -43,11 +44,16 @@ const queuedMessageIds = new Set<string>();
 
 export type BatchError = { message: string; failedIds: readonly MessageId[] } | null;
 
-// Error callback storage (set by the hook)
+// Callbacks for batch events (set by the hook)
 let onBatchError: ((error: BatchError) => void) | null = null;
+let onBatchSuccess: ((ids: readonly MessageId[]) => void) | null = null;
 
-export const setBatchErrorCallback = (callback: ((error: BatchError) => void) | null) => {
-  onBatchError = callback;
+export const setBatchCallbacks = (callbacks: {
+  onError: ((error: BatchError) => void) | null;
+  onSuccess: ((ids: readonly MessageId[]) => void) | null;
+}) => {
+  onBatchError = callbacks.onError;
+  onBatchSuccess = callbacks.onSuccess;
 };
 
 const batchProcessorAtom = appRuntime
@@ -70,14 +76,22 @@ const batchProcessorAtom = appRuntime
               .pipe(
                 networkMonitor.latch.whenOpen,
                 Effect.retry({ times: 3, schedule: Schedule.exponential("500 millis", 2) }),
-                Effect.tap(() => Effect.log(`Batched: ${Chunk.join(batch, ", ")}`)),
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    const ids = Chunk.toReadonlyArray(batch) as MessageId[];
+                    console.log(`Batched: ${ids.join(", ")}`);
+                    onBatchSuccess?.(ids);
+                  }),
+                ),
                 Effect.tapErrorCause(() =>
-                  Effect.sync(() =>
+                  Effect.sync(() => {
+                    const ids = Chunk.toReadonlyArray(batch) as MessageId[];
+                    console.error("Batch failed:", ids.join(", "));
                     onBatchError?.({
                       message: "Failed to mark messages as read",
-                      failedIds: Chunk.toReadonlyArray(batch) as MessageId[],
-                    }),
-                  ),
+                      failedIds: ids,
+                    });
+                  }),
                 ),
                 Effect.catchAllCause((cause) => Effect.log(cause, "Error processing batch")),
               ),
@@ -101,10 +115,19 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
   const [readMessageIds, setReadMessageIds] = React.useState<Set<string>>(new Set());
   const [batchError, setBatchError] = React.useState<BatchError>(null);
 
-  // Register error callback
+  // Register batch callbacks
   React.useEffect(() => {
-    setBatchErrorCallback(setBatchError);
-    return () => setBatchErrorCallback(null);
+    setBatchCallbacks({
+      onError: setBatchError,
+      onSuccess: (ids) => {
+        setReadMessageIds((prev) => {
+          const next = new Set(prev);
+          ids.forEach((id) => next.add(id));
+          return next;
+        });
+      },
+    });
+    return () => setBatchCallbacks({ onError: null, onSuccess: null });
   }, []);
 
   // Clear error
@@ -112,7 +135,7 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
     setBatchError(null);
   }, []);
 
-  // Mark a message as read: queue it for batching + optimistic update
+  // Mark a message as read: queue it for batching (no optimistic update)
   const markAsRead = React.useCallback(
     (id: Message["id"]) => {
       if (queuedMessageIds.has(id)) return;
@@ -121,8 +144,6 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
       if (Result.isSuccess(processorResult)) {
         processorResult.value.markAsReadQueue.unsafeOffer(id);
       }
-
-      setReadMessageIds((prev) => new Set(prev).add(id));
     },
     [processorResult],
   );
