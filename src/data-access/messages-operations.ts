@@ -148,10 +148,19 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
     [processorResult],
   );
 
+  // Combine server-side read IDs with locally marked read IDs
+  const skipIds = React.useMemo(() => {
+    const ids = new Set<string>(readMessageIds);
+    messages.forEach((msg) => {
+      if (msg.readAt !== null) ids.add(msg.id);
+    });
+    return ids;
+  }, [messages, readMessageIds]);
+
   // Track visibility and mark as read when elements become visible
   const { setElementRef, getElement } = useVisibilityTracker({
     onVisible: markAsRead,
-    skipIds: readMessageIds,
+    skipIds,
   });
 
   // Handle focus events - mark visible unread messages as read
