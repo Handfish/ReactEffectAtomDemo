@@ -49,7 +49,8 @@ const MessageListWithReadTracking = ({
   loading: boolean;
   onLoadMore: () => void;
 }) => {
-  const { setElementRef, messages } = useMarkMessagesAsRead(initialMessages);
+  const { setElementRef, messages, batchError, clearError } =
+    useMarkMessagesAsRead(initialMessages);
   const loadMoreRef = React.useRef<HTMLDivElement>(null);
 
   // Observe the load more sentinel to trigger infinite scroll
@@ -74,6 +75,17 @@ const MessageListWithReadTracking = ({
 
   return (
     <>
+      {batchError && (
+        <div className="mx-4 mt-4 flex items-center justify-between rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <span>{batchError.message}</span>
+          <button
+            onClick={clearError}
+            className="ml-4 text-destructive hover:text-destructive/80"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <MessageList messages={messages} setElementRef={setElementRef} />
       {!done && (
         <div ref={loadMoreRef} className="flex justify-center p-4">

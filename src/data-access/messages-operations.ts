@@ -41,6 +41,15 @@ export const useMessagesQuery = () => {
 // Track which message IDs have been queued to avoid duplicates
 const queuedMessageIds = new Set<string>();
 
+export type BatchError = { message: string; failedIds: readonly MessageId[] } | null;
+
+// Error callback storage (set by the hook)
+let onBatchError: ((error: BatchError) => void) | null = null;
+
+export const setBatchErrorCallback = (callback: ((error: BatchError) => void) | null) => {
+  onBatchError = callback;
+};
+
 const batchProcessorAtom = appRuntime
   .atom(
     Effect.gen(function* () {
@@ -62,6 +71,14 @@ const batchProcessorAtom = appRuntime
                 networkMonitor.latch.whenOpen,
                 Effect.retry({ times: 3, schedule: Schedule.exponential("500 millis", 2) }),
                 Effect.tap(() => Effect.log(`Batched: ${Chunk.join(batch, ", ")}`)),
+                Effect.tapErrorCause(() =>
+                  Effect.sync(() =>
+                    onBatchError?.({
+                      message: "Failed to mark messages as read",
+                      failedIds: Chunk.toReadonlyArray(batch) as MessageId[],
+                    }),
+                  ),
+                ),
                 Effect.catchAllCause((cause) => Effect.log(cause, "Error processing batch")),
               ),
           { concurrency: 1 },
@@ -82,6 +99,18 @@ const batchProcessorAtom = appRuntime
 export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
   const processorResult = useAtomValue(batchProcessorAtom);
   const [readMessageIds, setReadMessageIds] = React.useState<Set<string>>(new Set());
+  const [batchError, setBatchError] = React.useState<BatchError>(null);
+
+  // Register error callback
+  React.useEffect(() => {
+    setBatchErrorCallback(setBatchError);
+    return () => setBatchErrorCallback(null);
+  }, []);
+
+  // Clear error
+  const clearError = React.useCallback(() => {
+    setBatchError(null);
+  }, []);
 
   // Mark a message as read: queue it for batching + optimistic update
   const markAsRead = React.useCallback(
@@ -142,5 +171,5 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
     [messages, readMessageIds],
   );
 
-  return { setElementRef, messages: messagesWithReadStatus };
+  return { setElementRef, messages: messagesWithReadStatus, batchError, clearError };
 };
