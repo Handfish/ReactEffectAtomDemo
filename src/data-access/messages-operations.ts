@@ -4,8 +4,9 @@ import { appRuntime } from "@/lib/app-runtime";
 import { NetworkMonitor } from "@/lib/services/network-monitor";
 import { Message, MessageId } from "@/types/message";
 import { Atom, Result, useAtom, useAtomRefresh, useAtomValue } from "@effect-atom/atom-react";
-import { Chunk, DateTime, Duration, Effect, Option, Queue, Schedule, Stream } from "effect";
+import { Chunk, Duration, Effect, Option, Queue, Schedule, Stream } from "effect";
 import React from "react";
+import { computeSkipIds, filterUnreadMessages, mergeReadStatus } from "./messages-utils";
 
 // ============================================================================
 // Messages Query with Infinite Scroll (using Atom.pull)
@@ -152,13 +153,10 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
   );
 
   // Combine server-side read IDs with locally marked read IDs
-  const skipIds = React.useMemo(() => {
-    const ids = new Set<string>(readMessageIds);
-    messages.forEach((msg) => {
-      if (msg.readAt !== null) ids.add(msg.id);
-    });
-    return ids;
-  }, [messages, readMessageIds]);
+  const skipIds = React.useMemo(
+    () => computeSkipIds(messages, readMessageIds),
+    [messages, readMessageIds],
+  );
 
   // Track visibility and mark as read when elements become visible
   const { setElementRef, getElement } = useVisibilityTracker({
@@ -168,7 +166,7 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
 
   // Handle focus events - mark visible unread messages as read
   const unreadMessages = React.useMemo(
-    () => messages.filter((msg) => msg.readAt === null && !readMessageIds.has(msg.id)),
+    () => filterUnreadMessages(messages, readMessageIds),
     [messages, readMessageIds],
   );
 
@@ -195,12 +193,7 @@ export const useMarkMessagesAsRead = (messages: readonly Message[]) => {
 
   // Merge read status for optimistic updates
   const messagesWithReadStatus = React.useMemo(
-    () =>
-      messages.map((msg) =>
-        readMessageIds.has(msg.id) && msg.readAt === null
-          ? { ...msg, readAt: DateTime.unsafeNow() }
-          : msg,
-      ),
+    () => mergeReadStatus(messages, readMessageIds),
     [messages, readMessageIds],
   );
 
