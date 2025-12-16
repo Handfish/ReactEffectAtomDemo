@@ -23,5 +23,4 @@ export class NetworkMonitor extends Effect.Service<NetworkMonitor>()("NetworkMon
 
     return { latch, ref };
   }),
-  accessors: true,
 }) {}
