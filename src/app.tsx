@@ -1,10 +1,10 @@
-import { ChatContainer } from "./components/chat";
+import { BedDataChart } from "./BedDataChart";
 
 function App() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="h-screen w-full max-w-md">
-        <ChatContainer />
+    <div className="min-h-screen bg-white p-8">
+      <div className="w-full">
+        <BedDataChart />
       </div>
     </div>
   );
